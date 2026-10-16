@@ -1,9 +1,11 @@
 {
   "name": "aps-acc-admin-tutorial",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Autodesk Platform Services application built by following the Forma Admin tutorial from https://aps.autodesk.com/tutorials.",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test",
+    "demo": "node tests/demo-server.js"
   },
   "keywords": [
     "autodesk-platform-services"
@@ -11,9 +13,10 @@
   "license": "MIT",
   "dependencies": {
     "@aps_sdk/authentication": "^1.0.0",
+    "@aps_sdk/autodesk-sdkmanager": "^1.0.1",
     "@aps_sdk/construction-account-admin": "^1.2.1",
     "@aps_sdk/data-management": "^1.1.2",
-    "cookie-session": "^2.1.1",
+    "express-session": "^1.19.0",
     "dotenv": "^17.2.3",
     "express": "^5.1.0"
   }

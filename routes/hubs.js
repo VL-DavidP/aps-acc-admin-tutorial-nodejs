@@ -1,5 +1,5 @@
 const express = require('express');
-const { authRefreshMiddleware, getHubs, getProjects } = require('../services/aps.js');
+function createHubsRouter({ authRefreshMiddleware, getHubs, getProjects }) {
 
 let router = express.Router();
 
@@ -23,4 +23,6 @@ router.get('/api/hubs/:hub_id/projects', async function (req, res, next) {
     }
 });
 
-module.exports = router;
+return router;
+}
+module.exports = { createHubsRouter };

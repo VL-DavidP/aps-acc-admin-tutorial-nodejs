@@ -1,132 +1,49 @@
-const { SdkManagerBuilder } = require('@aps_sdk/autodesk-sdkmanager');
-const { AuthenticationClient, Scopes, ResponseType } = require('@aps_sdk/authentication');
+const { SdkManagerBuilder, ResiliencyConfiguration } = require('@aps_sdk/autodesk-sdkmanager');
+const { AuthenticationClient, Scopes } = require('@aps_sdk/authentication');
 const { DataManagementClient } = require('@aps_sdk/data-management');
 const { AdminClient } = require('@aps_sdk/construction-account-admin');
-
-const { APS_CLIENT_ID, APS_CLIENT_SECRET, APS_CALLBACK_URL } = require('../config.js');
-
-const service = module.exports = {};
+const settings = require('../config.js');
+const { createAuthHandlers } = require('./auth.js');
+const { collectPages } = require('./pagination.js');
 
 const sdk = SdkManagerBuilder.create().build();
-const authenticationClient = new AuthenticationClient(sdk);
-const dataManagementClient = new DataManagementClient(sdk);
-const adminClient = new AdminClient(sdk);
+// Reads can retry. A failed write must pass through the app's recovery checks.
+const writeSdk = SdkManagerBuilder.create().addResiliencyConfiguration(new ResiliencyConfiguration(0, 0, 0, 31000)).build();
+const authenticationClient = new AuthenticationClient({ sdkManager: writeSdk });
+const dataManagementClient = new DataManagementClient({ sdkManager: sdk });
+const adminClient = new AdminClient({ sdkManager: sdk });
+const writeClient = new AdminClient({ sdkManager: writeSdk });
+const scopes = [Scopes.DataRead, Scopes.DataWrite, Scopes.AccountRead, Scopes.AccountWrite];
+const service = module.exports = createAuthHandlers(authenticationClient, settings, scopes);
+const nativeId = id => id.replace(/^b\./, '');
+const readOptions = (token, region) => ({ accessToken: token, region, options: { timeout: 30000 } });
+const writeOptions = readOptions;
 
-
-service.getAuthorizationUrl = () => authenticationClient.authorize(APS_CLIENT_ID, ResponseType.Code, APS_CALLBACK_URL, [
-    Scopes.DataRead,
-    Scopes.AccountRead,
-    Scopes.AccountWrite
-]);
-
-service.authCallbackMiddleware = async (req, res, next) => {
-    const credentials = await authenticationClient.getThreeLeggedToken(APS_CLIENT_ID, req.query.code, APS_CALLBACK_URL,{clientSecret:APS_CLIENT_SECRET});
-    req.session.token = credentials.access_token;
-    req.session.refresh_token = credentials.refresh_token;
-    req.session.expires_at = Date.now() + credentials.expires_in * 1000;
-    next();
+service.getUserProfile = token => authenticationClient.getUserInfo(token.access_token, { options: { timeout: 30000 } });
+service.getHubs = async token => {
+    const response = await dataManagementClient.getHubs({ accessToken: token.access_token, options: { timeout: 30000 } });
+    if (!Array.isArray(response.data)) throw Object.assign(new Error('Autodesk did not return an account list.'), { status: 502 });
+    return response.data.filter(item => item.id?.startsWith('b.'));
 };
-
-service.authRefreshMiddleware = async (req, res, next) => {
-    const { refresh_token, expires_at } = req.session;
-    if (!refresh_token) {
-        res.status(401).end();
-        return;
-    }
-
-    if (expires_at < Date.now()) {
-        const credentials = await authenticationClient.refreshToken(refresh_token, APS_CLIENT_ID, {
-            clientSecret: APS_CLIENT_SECRET,
-            scopes: [
-                Scopes.DataRead,
-                Scopes.AccountRead,
-                Scopes.AccountWrite
-            ]
-        });
-        req.session.token = credentials.access_token;
-        req.session.refresh_token = credentials.refresh_token;
-        req.session.expires_at = Date.now() + credentials.expires_in * 1000;
-    }
-    req.oAuthToken = {
-        access_token: req.session.token,
-        expires_in: Math.round((req.session.expires_at - Date.now()) / 1000)
-    };
-    next();
-};
-
-service.getUserProfile = async (token) => {
-    const resp = await authenticationClient.getUserInfo(token.access_token);
-    return resp;
-};
-
-// Data Management APIs
-service.getHubs = async (token) => {
-    const resp = await dataManagementClient.getHubs({ accessToken: token.access_token });
-    return resp.data.filter((item)=>{
-        return item.id.startsWith('b.');
-    })
-};
-
 service.getProjects = async (hubId, token) => {
-    const resp = await dataManagementClient.getHubProjects(hubId, { accessToken: token.access_token});
-    return resp.data.filter( (item)=>{
-        return item.attributes.extension.data.projectType == 'ACC';
-    } )
+    const response = await dataManagementClient.getHubProjects(hubId, { accessToken: token.access_token });
+    return response.data.filter(item => item.attributes?.extension?.data?.projectType === 'ACC');
 };
-
-// ACC Admin APIs
-service.getProjectsACC = async (accountId, token) => {
-    let allProjects = [];
-    let offset = 0;
-    let totalResults = 0;
-    do {
-        const resp = await adminClient.getProjects(accountId, { offset: offset, accessToken: token });
-        allProjects = allProjects.concat(resp.results);
-        offset += resp.pagination.limit;
-        totalResults = resp.pagination.totalResults;
-    } while (offset < totalResults)
-    return allProjects;
-};
-
-service.createProjectACC = async (accountId, projectInfo, token) =>{
-    const resp = await adminClient.createProject(accountId, projectInfo, { accessToken: token});
-    return resp;
-}
-
-service.getProjectACC = async (projectId, token) => {
-    const resp = await adminClient.getProject(projectId, { accessToken: token });
-    return resp;
-};
-
-service.getProjectUsersACC = async (projectId, token) => {
-    let allUsers = [];
-    let offset = 0;
-    let totalResults = 0;
-    do{
-        const resp = await adminClient.getProjectUsers(projectId, { offset: offset, accessToken: token });
-        allUsers = allUsers.concat(resp.results);
-        offset += resp.pagination.limit;
-        totalResults = resp.pagination.totalResults;
-    }while (offset < totalResults) 
-    return allUsers;
-};
-
-service.addProjectAdminACC = async (projectId, email, token) => {
-    const userBody = {
-        "email": email,
-        "products": [{
-            "key": "projectAdministration",
-            "access": "administrator"
-        }, {
-            "key": "docs",
-            "access": "administrator"
-        }]
-    }
-    const resp = await adminClient.assignProjectUser(projectId, userBody, { accessToken: token });
-    return resp;
-}
-
-service.importProjectUsersACC = async (projectId, projectUsers, token) => {
-    const resp = await adminClient.importProjectUsers(projectId, projectUsers, { accessToken: token });
-    return resp;
-}
+service.getProjectsACC = (accountId, token, region) => collectPages(offset =>
+    adminClient.getProjects(nativeId(accountId), { ...readOptions(token, region), offset, limit: 200, filterPlatform: ['acc'] }));
+service.getProjectUsersACC = (projectId, token, region) => collectPages(offset =>
+    adminClient.getProjectUsers(nativeId(projectId), { ...readOptions(token, region), offset, limit: 200 }));
+service.getProjectACC = (projectId, token, region) =>
+    adminClient.getProject(nativeId(projectId), readOptions(token, region));
+service.createProjectACC = (accountId, payload, token, region) =>
+    writeClient.createProject(nativeId(accountId), payload, writeOptions(token, region));
+service.assignProjectUserACC = (projectId, payload, token, region) =>
+    writeClient.assignProjectUser(nativeId(projectId), payload, writeOptions(token, region));
+service.updateProjectUserACC = (projectId, userId, payload, token, region) =>
+    writeClient.updateProjectUser(nativeId(projectId), userId, payload, writeOptions(token, region));
+service.removeProjectUserACC = (projectId, userId, token, region) =>
+    writeClient.removeProjectUser(nativeId(projectId), userId, writeOptions(token, region));
+service.addProjectAdminACC = (projectId, email, token, region) => service.assignProjectUserACC(projectId, {
+    email,
+    products: [{ key: 'projectAdministration', access: 'administrator' }, { key: 'docs', access: 'administrator' }]
+}, token, region);

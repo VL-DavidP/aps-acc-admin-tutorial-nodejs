@@ -1,15 +1,16 @@
 const express = require('express');
-const { getAuthorizationUrl, authCallbackMiddleware, authRefreshMiddleware, getUserProfile } = require('../services/aps.js');
+const crypto = require('node:crypto');
+function createAuthRouter({ getAuthorizationUrl, authCallbackMiddleware, authRefreshMiddleware, getUserProfile }) {
 
 let router = express.Router();
 
 router.get('/api/auth/login', function (req, res) {
-    res.redirect(getAuthorizationUrl());
+    req.session.oauthState = crypto.randomBytes(24).toString('hex');
+    res.redirect(getAuthorizationUrl(req.session.oauthState));
 });
 
 router.get('/api/auth/logout', function (req, res) {
-    req.session = null;
-    res.redirect('/');
+    req.session.destroy(() => res.redirect('/'));
 });
 
 router.get('/api/auth/callback', authCallbackMiddleware, function (req, res) {
@@ -24,5 +25,10 @@ router.get('/api/auth/profile', authRefreshMiddleware, async function (req, res,
         next(err);
     }
 });
+router.use('/api/auth/callback', (err, req, res, next) => {
+    res.redirect('/?authError=' + encodeURIComponent('Autodesk sign-in could not be completed. Start sign-in again. Check that this app uses the callback URL registered in APS.'));
+});
 
-module.exports = router;
+return router;
+}
+module.exports = { createAuthRouter };

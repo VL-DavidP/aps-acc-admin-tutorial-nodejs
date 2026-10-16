@@ -1,4 +1,17 @@
-# Forma Admin Tutorial (Node.js)
+# ACC Admin — Live app (Node.js)
+
+This working revision adds a project/member administration workspace, CSV preview
+and validation, sequential bulk jobs with recovery, reusable setup presets,
+account access reports, and persistent import history to the Autodesk tutorial.
+
+**Start here: [Live setup](LIVE-SETUP.md)** and [feature guide](REVISION-1.md).
+
+- Real account: configure `.env`, then `npm install` and `npm start`.
+- Local mock with no Autodesk writes: `npm run demo` at http://127.0.0.1:8081.
+- Automated checks: `npm test`.
+
+The tutorial's original background and setup notes follow. Session cookies now
+contain a session ID; tokens are stored in server memory.
 
 ![platforms](https://img.shields.io/badge/platform-windows%20%7C%20osx%20%7C%20linux-lightgray.svg)
 [![node.js](https://img.shields.io/badge/Node.js-20.10-blue.svg)](https://nodejs.org)
@@ -39,7 +52,7 @@ and `<secret-phrase>` with an arbitrary string:
 APS_CLIENT_ID="<client-id>"
 APS_CLIENT_SECRET="<client-secret>"
 APS_CALLBACK_URL="http://localhost:8080/api/auth/callback" # URL your users will be redirected to after logging in with their Autodesk account
-SERVER_SESSION_SECRET="<secret-phrase>" # phrase used to encrypt/decrypt server session cookies
+SERVER_SESSION_SECRET="<secret-phrase>" # secret used to sign the session ID cookie
 ```
 
 > For applications deployed to a custom domain, the callback URL will be `http://<your-domain>/api/auth/callback`
